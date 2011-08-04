@@ -31,7 +31,7 @@ that's bored enough to play it :-)
 
     # IRC
     !hangman       # Start a new game, uses a word from standard dictionary.
-    !hangman-solo  # Like above, but exclusivly for you.
+    !hangman-solo  # Like above, but exclusively for you.
 
     # Start a new PvP game using a specific word, if the optional nick is 
     # supplied then you challenge that person to a 1v1 game.
@@ -55,7 +55,7 @@ specified.
 
 Players make their guesses by addressing the bot with a single letter.  The bot
 will then reveal if that letter was correct or not.  If it was correct, all 
-occurances of that letter will appear in place in the word.  On an incorrect 
+occurrences of that letter will appear in place in the word.  On an incorrect 
 guess however, a life is removed.  A guess of the complete word can be made at 
 any time by addressing the bot with the complete word.  
 
@@ -74,11 +74,11 @@ The solo game is invoked by saying !hangman-solo.
 =item Challenge Mode
 
 Challenge mode presents the opportunity for players to go head to head.  A 
-player can specify their own word to challenge others.  This can be in both
+player can specify their own word(s) to challenge others.  This can be in both
 the general play format or against a specific player.
 
 To begin a challenge game, a player sends a private message to the bot
-containing the chosen word, and optionally the nick of a player to chanllage.
+containing the chosen word(s), and optionally the nick of a player to challenge.
 
 =head1 WISHLIST
 
@@ -91,11 +91,6 @@ Eventually I want to add the following:
 A !command to effect the game parameters, such as word length, number of lives
 etc.
 
-=item Premeture Termination
-
-The ability to end a game at any point.
-
-=back
 
 =back
 
@@ -103,7 +98,7 @@ The ability to end a game at any point.
 
 =head2 send
 
-Overriddes send from Bot::BasicBot::Pluggable;
+Overrides send from Bot::BasicBot::Pluggable
 
 =cut
 
@@ -120,7 +115,7 @@ sub said {
         = (defined $games->{$player}) ? $message->{who} : $message->{channel};
     my $game_data = $games->{$game_name};
 
-    # If we've been privately messaged, of it's a public message then we need 
+    # If we've been privately messaged, or it's a public message then we need 
     # to look for a command. 
     if (   !$address
         ||  $address eq 'msg') 
@@ -307,7 +302,7 @@ sub _process_guess {
         chomp $word;
 
         if ($word ~~ @{ $data->{guessedwords} }) {
-            return "That words has been guessed!";
+            return "That word has been guessed!";
         }
 
         push @{ $data->{guessedwords} }, $guess;
@@ -366,11 +361,11 @@ sub _game_state {
         return "\\o/ Congratulations, You win! Word: $data->{word}";
     }
     
-    # Check for teh lost.
+    # Check for teh lose.
     if ($data->{lives} == 0) {
         delete $games->{$game_name};
         $self->bot->store->set($namespace, 'games', $games);
-        return ":-( You loose! Word: $data->{word}";
+        return ":-( You lose! Word: $data->{word}";
     }
 
     # Build a state line and return it to be said to the channel.
