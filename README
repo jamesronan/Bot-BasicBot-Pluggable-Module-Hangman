@@ -1,0 +1,62 @@
+Bot-BasicBot-Pluggable-Module-Hangman
+
+This is a hangman module for the IRC Bot Bot::BasicBot::Pluggable...
+
+IT IS NOT FINISHED... The docs aren't correct and half the functionality
+is missing/doesn't work... You can however play a general public game with it
+:-)
+
+It's a work in progress .... Watch this space...
+
+JamesR
+
+
+INSTALLATION
+
+To install this module, run the following commands:
+
+	perl Makefile.PL
+	make
+	make test
+	make install
+
+SUPPORT AND DOCUMENTATION
+
+After installing, you can find documentation for this module with the
+perldoc command.
+
+    perldoc Bot::BasicBot::Pluggable::Module::Hangman
+
+You can also look for information at:
+
+    RT, CPAN's request tracker (report bugs here)
+        http://rt.cpan.org/NoAuth/Bugs.html?Dist=Bot-BasicBot-Pluggable-Module-Hangman
+
+    AnnoCPAN, Annotated CPAN documentation
+        http://annocpan.org/dist/Bot-BasicBot-Pluggable-Module-Hangman
+
+    CPAN Ratings
+        http://cpanratings.perl.org/d/Bot-BasicBot-Pluggable-Module-Hangman
+
+    Search CPAN
+        http://search.cpan.org/dist/Bot-BasicBot-Pluggable-Module-Hangman/
+
+
+LICENSE AND COPYRIGHT
+
+Copyright (C) 2011 James Ronan
+
+This program is free software; you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation; version 2 dated June, 1991 or at your option
+any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+A copy of the GNU General Public License is available in the source tree;
+if not, write to the Free Software Foundation, Inc.,
+59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+
