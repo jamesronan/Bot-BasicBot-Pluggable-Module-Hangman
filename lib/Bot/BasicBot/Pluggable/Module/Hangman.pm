@@ -154,8 +154,8 @@ sub said {
 
         # !guesses command, outputs the current failed attempts.
         if ($body =~ /^!guesses/) {
-            my $letters = join ", ", @{ $game_data->{guesses} };
-            my $words   = join ", ", @{ $game_data->{guessedwords} }; 
+            my $letters = join ", ", sort @{ $game_data->{guesses} };
+            my $words   = join ", ", sort @{ $game_data->{guessedwords} }; 
             return  "Guessed letters: $letters\nGuessed Words: $words";
         }
 
