@@ -215,7 +215,8 @@ sub _begin_game {
 
     my $games = $bot->store->get( $namespace, 'games' ) // {};
     if ( exists $games->{$game_name} ) {
-        return "A game is already in progress!";
+        return "A game is already in progress!"
+              . $self->_game_state($game_name);
     }
 
     $game_data = {
