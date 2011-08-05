@@ -234,17 +234,17 @@ sub _begin_game {
 
     # If this was a challenge game, it needs to return to the channel, else it
     # can respond to the sender.
-    my $response = {
-        who     => $command->{nick},
-        channel => $command->{channel} || $message->{channel}, 
-        body    => $self->_game_state($game_name),
-        address => '',
-    };
-
-    require Data::Dump;
-    warn Data::Dump->dump($response);
-
-    return $response;
+    if ($command->{channel}) {
+        $self->bot->say(
+            who     => $command->{nick},
+            channel => $command->{channel} || $message->{channel},
+            body    => "You have been challenged by $player\n"
+                      .$self->_game_state($game_name),
+            address => $command->{nick},
+        );
+    } else {
+        return $self->_game_state($game_name);
+    }
 }
 
 
