@@ -18,8 +18,16 @@ Version 0.01
 
 our $VERSION = '0.01';
 
-my $dictionary_file = '/usr/share/dict/words';
-my $namespace = 'Reaper';
+# Bot defaults, These can be tweaked customise the bot. They are all accessable
+# and/or changeable from within IRC via the bot itself.
+my $default_options = {
+    lives         => 10,
+    auto_restart  => 0,
+    wordsource    => 'file',
+    wordfile      => 'words',
+};
+my $wordfile_path     = "./wordfiles/";
+my $fallback_wordfile = "/usr/share/dict/words";
 
 =head1 SYNOPSIS
 
@@ -33,9 +41,9 @@ that's bored enough to play it :-)
     !hangman       # Start a new game, uses a word from standard dictionary.
     !hangman-solo  # Like above, but exclusively for you.
 
-    # Start a new PvP game using a specific word, if the optional nick is 
-    # supplied then you challenge that person to a 1v1 game.
-    /msg <bot-name> hangman <word> [<nick_of_player>] 
+    # Start a new PvP game using a specific word, if the nick is a channel then
+    # a general challenge is started.
+    /msg <bot-name> hangman <nick_or_channel> <word or phrase> 
 
 =head1 DESCRIPTION
 
@@ -80,21 +88,38 @@ the general play format or against a specific player.
 To begin a challenge game, a player sends a private message to the bot
 containing the chosen word(s), and optionally the nick of a player to challenge.
 
-=head1 WISHLIST
-
-Eventually I want to add the following:
-
-=over 4
-
-=item Rules access method
-
-A !command to effect the game parameters, such as word length, number of lives
-etc.
-
-
 =back
 
 =head1 METHODS
+
+=head2 init
+
+Overrides init from Bot::BasicBot::Pluggable::Module.  Called when the module
+is added to the Bot.  Sets up defaults etc.
+
+=cut 
+
+sub init {
+    my ($self) = @_;
+
+    $self->{wordsources} = [ qw( file urbandict ) ];
+    $self->{namespace}   = 'Reaper';
+    $self->bot->store->set($self->{namespace}, 'options', $default_options);
+}
+
+=head2 help
+
+Help text for IRC users. TODO
+
+=cut
+
+sub help {
+
+    # TODO - Write this.
+    return "Yeah... er. I need to to this.... sorry!";
+
+}
+
 
 =head2 send
 
@@ -110,7 +135,7 @@ sub said {
     my $player    = $message->{who};
     my $address   = $message->{address};
     my $body      = $message->{body};
-    my $games     = $self->bot->store->get($namespace, 'games') // {};
+    my $games     = $self->bot->store->get($self->{namespace}, 'games') // {};
     my $game_name 
         = (defined $games->{$player}) ? $message->{who} : $message->{channel};
     my $game_data = $games->{$game_name};
@@ -140,7 +165,7 @@ sub said {
             /xi)
         {
             my %named_matches = %+;
-            return $self->_begin_game(
+            return $self->begin_game(
                 player  => $player,
                 message => $message,
                 command => \%named_matches,
@@ -149,11 +174,14 @@ sub said {
 
         # !state command, outputs the current wordstate.
         if ($body =~ /^!state/) {
-            return $self->_game_state($game_name);
+            return $self->game_state($game_name);
         }
 
         # !guesses command, outputs the current failed attempts.
         if ($body =~ /^!guesses/) {
+            if (!$game_data) {
+                return "There is currently no game in progress :-(";
+            }
             my $letters = join ", ", sort @{ $game_data->{guesses} };
             my $words   = join ", ", sort @{ $game_data->{guessedwords} }; 
             return  "Guessed letters: $letters\nGuessed Words: $words";
@@ -165,23 +193,43 @@ sub said {
             return "Current games: $games";
         }
 
-        if ($body =~ /^!endgame \s (?<game> \#?\S+ )/xi) {
+        # !endgame command, ends the named game
+        if ($body =~ /^!endgame (?: \s (?<game> \#?\S+ ) )?/xi) {
+            if (!$+{game}) {
+                return "Usage: !endgame <game_name>\nCurrent games: "
+                    . join ', ', keys %$games;
+            }
             my $deleted = delete $games->{$+{game}} 
                 if exists( $games->{$+{game}} );
-            $self->bot->store->set($namespace, 'games', $games);
+            $self->bot->store->set($self->{namespace}, 'games', $games);
             return ($deleted) ? "Game ended: $+{game}" : "No game: $+{game}";
+        }
+
+        # !option command, sets/displays an option.
+        if ($body =~ /^!option \s (?<name> \S+) (?:\s (?<value> \S+))?/xi) {
+            return $self->option_handler($+{name}, $+{value});
+        }
+
+        # !options command, displays all current settings.
+        if ($body =~ /^!options/) {
+            my $options = $self->bot->store->get($self->{namespace}, 'options');
+            return "Current options:\n"
+                 . join "\n", map { "$_ = $options->{ $_ }" } keys %$options;
         }
 
         # Add the ability to take a single unaddressed letter to be a guess.
         if (length $body == 1) {
-            return $self->_process_guess($message);
+            return $self->process_guess($message);
         }
-
     }
 
     if ($address) {
+
+        # PM'd and no match above... Not for us
+        return undef if ($address eq 'msg');
+
         # If we've been addressed then someone is making a guess.
-        return $self->_process_guess($message);
+        return $self->process_guess($message);
     }
 
     # Failing that, the message was nothing to do with us.
@@ -190,16 +238,17 @@ sub said {
 
 # create a game hashref in the %games hash, keyed on the challenged player; 
 # storing the word, the current word state, guessed letters and the current 
-# number of lives.  This hash is used by _process_guess() to keep track and 
+# number of lives.  This hash is used by process_guess() to keep track and 
 # advance the game.
 
-sub _begin_game {
+sub begin_game {
     my ($self, %params) = @_;
 
-    my $bot     = $self->bot;
-    my $player  = $params{player};
-    my $command = $params{command};
-    my $message = $params{message};
+    my $bot          = $self->bot;
+    my $player       = $params{player};
+    my $command      = $params{command};
+    my $message      = $params{message};
+    my $announcement = $params{announcement};
 
     # Construct the game.
     my $game_data = {};
@@ -213,25 +262,29 @@ sub _begin_game {
         return "Internal Fail... no game name...";
     }
 
-    my $games = $bot->store->get( $namespace, 'games' ) // {};
+    my $games = $bot->store->get( $self->{namespace}, 'games' ) // {};
     if ( exists $games->{$game_name} ) {
-        return "A game is already in progress!"
-              . $self->_game_state($game_name);
+        return "A game is already in progress!\n"
+              . $self->game_state($game_name);
     }
 
+    # Start constructing the game data, we'll need the rules.
+    my $options = $self->bot->store->get($self->{namespace}, 'options');
     $game_data = {
         guesses      => [],
         guessedwords => [],
-        lives        => 10,
-        word         => ($command->{words})
-            ? lc $command->{words}
-            : lc _get_dict_word(),
+        lives        => $options->{lives},
     };
-    ($game_data->{wordstate} = $game_data->{word}) =~ s/\w/_ /g;
+    ($game_data->{word}, $game_data->{word_definition}) = ($command->{words})
+        ? lc $command->{words}
+        : $self->get_game_word;
+    $game_data->{wordstate} = $game_data->{word};
+    $game_data->{wordstate} =~ s/\s/\/ /g;
+    $game_data->{wordstate} =~ s/\w/_ /g;
 
     # Now add the game data to the games store.
     $games->{$game_name} = $game_data;
-    $bot->store->set($namespace, 'games', $games);
+    $bot->store->set($self->{namespace}, 'games', $games);
 
     # If this was a challenge game, it needs to return to the channel, else it
     # can respond to the sender.
@@ -240,23 +293,24 @@ sub _begin_game {
             who     => $command->{nick},
             channel => $command->{channel} || $message->{channel},
             body    => "You have been challenged by $player\n"
-                      .$self->_game_state($game_name),
+                      .$self->game_state($game_name),
             address => $command->{nick},
         );
     } else {
-        return $self->_game_state($game_name);
+        $announcement = ($announcement) ? "$announcement\n" : '';
+        return $announcement . $self->game_state($game_name);
     }
 }
 
 
 # Process a guess and progress the game.
 
-sub _process_guess {
+sub process_guess {
     my ($self, $message) = @_;
 
     my $player    = $message->{who};
     my $addressby = ($message->{address}) ? '' : "$player: ";
-    my $games     = $self->bot->store->get($namespace, 'games');
+    my $games     = $self->bot->store->get($self->{namespace}, 'games');
     my $game_name = ( exists( $games->{$player} ) ) 
         ? $player 
         : $message->{channel};
@@ -315,65 +369,193 @@ sub _process_guess {
         }
     }
 
-    $self->bot->store->set($namespace, 'games', $games );
-    return $self->_game_state($game_name);
+    # Check for the win or loose here, have state only output the word
+    # state.
+    my $endgame_repsonse;
+    if ($data->{wordstate} !~ m/_/) {
+        $endgame_repsonse 
+            = "\\o/ Congratulations, You win! Word: $data->{word}";
+    }
+    if ($data->{lives} == 0) {
+        $endgame_repsonse = ":-( You lose! Word: $data->{word}";
+    }
+
+    # If we hit the win or lose point, delete the game, and check whether
+    # were going to restart before responding.
+    if ($endgame_repsonse) {
+        delete $games->{$game_name};
+        $self->bot->store->set($self->{namespace}, 'games', $games);
+
+        # If auto restart is set and this is a channel game, restart it
+        # (we don't restart challenge games.
+        my $options = $self->bot->store->get($self->{namespace}, 'options');
+        if (   $options->{auto_restart}
+            && $game_name =~ /^\#/ )
+        {
+            return $self->begin_game(
+                player       => $player,
+                message      => $message,
+                announcement => $endgame_repsonse, 
+            );
+        } else {
+            return $endgame_repsonse;
+        }
+    }
+
+    # Failing all else the word may of been updated so save the update and 
+    # quote the current state.
+    $self->bot->store->set($self->{namespace}, 'games', $games );
+    return $self->game_state($game_name);
+}
+
+sub option_handler {
+    my ($self, $name, $value) = @_;
+    my $options = $self->bot->store->get($self->{namespace}, 'options');
+
+    # If the option is unrecognised, bail....
+    if ( ! exists $options->{ $name } ) {
+        return "I don't know option '$name', sorry\n" 
+             . "Options: " . join ', ', keys %$options;
+    }
+
+    my @word_files   = $self->word_files;
+    my @word_sources = @{ $self->{wordsources} };
+    my $current_option_values = {
+        wordsource   => join(', ', sort @word_sources),
+        wordfile     => join(', ', sort @word_files),
+        auto_restart => "0, 1", 
+    };
+
+    # If there is no value, 'get' its value :-)
+    if ( ! defined $value ) {
+        my $extra_data = $current_option_values->{$name};
+        $extra_data = ($extra_data) ? "[ $extra_data ]" : '';
+        return "Option $name: '$options->{ $name }' $extra_data";
+    }
+
+    # If there is a value, we need to 'set' it - if it's an acceptable value.
+    if (   $name eq 'wordsource'
+        && !($value ~~ @word_sources) ) 
+    {
+        return "Option $name cannot have value '$value'\n"
+             . "Available wordfile sources: "
+             . $current_option_values->{ $name };
+    }
+
+    if (   $name eq 'wordfile'
+        && !($value ~~ @word_files) ) 
+    {
+        return "Wordfile: $value does not exist.\n"
+             . "Currently available wordfiles: "
+             . $current_option_values->{ $name };
+    }
+
+    if (   $name eq 'auto_restart'
+        && $value !~ /^[01]$/ ) 
+    {
+        return "Option $name can only be set to 0 or 1";
+    }
+
+    if (   $name eq 'lives'
+        && $value !~ /^\d+$/ ) 
+    {
+        return "Option $name must be a number";
+    }
+
+    # If it's good, update the value, store it, and report success.
+    $options->{ $name } = $value;
+    $self->bot->store->set($self->{namespace}, 'options', $options);
+    return "Option $name updated: $value";
 }
 
 
-# Gets a word from the dict file, if the file is missing, sets the word
-# to NODICT.  This should be irritating enough to make the admin fix it.
+# Prints the game state line "public: _ _ _ _ 10/10"
 
-sub _get_dict_word {
-    my ($self) = @_;
+sub game_state {
+    my ($self, $game_name) = @_;
 
-    if ( ! -e $dictionary_file) {
-        return "NODICT";
+    # Get the game data.
+    my $games   = $self->bot->store->get($self->{namespace}, 'games') // {};
+    my $options = $self->bot->store->get($self->{namespace}, 'options');
+
+    my $data = $games->{$game_name}; 
+    if (!$data) {
+        return "There is currently no game in progress :-(";
     }
 
-    open my $dict_fh, '<', $dictionary_file;
-    my @words = <$dict_fh>;
-    close $dict_fh;
+    # Build a state line and return it to be said to the channel.
+    my $wordstate = $data->{wordstate};
+    chomp $wordstate;
+    return "$game_name:   $wordstate    $data->{lives}/$options->{lives}";
+}
+
+# Decides where to get the word (and optionally the meaning) from and calls
+# the appropriate method.
+
+sub get_game_word {
+    my ($self) = @_;
+
+    my $options = $self->bot->store->get($self->{namespace}, 'options');    
+    my $wordfile = $wordfile_path . $options->{wordfile};
+    return my ($word, $meaning) = {
+        'file'      => \&_get_word_from_file,
+        'urbandict' => \&_get_word_from_urbandictionary, 
+    }->{$options->{wordsource}}->($wordfile);
+}
+
+# Lists the word files in the word file directory.
+
+sub word_files {
+    my ($self) = @_;
+
+    my $options = $self->bot->store->get($self->{namespace}, 'options');
+
+    my @files;
+    opendir my $dh, $wordfile_path;
+    file:
+    while (my $file = readdir($dh)) {
+        next file if ($file =~ /^\./);
+        next file if (-d "$wordfile_path$file");
+        push @files, $file;
+    }
+
+    return @files;
+}
+
+# Private Subs
+
+# Retrieves a word from the specified wordfile. The word file can be relative to
+# the bot script or absolute.  If it does not exist, the fallback file is
+# attempted (defined at the top of this module)  Failing that NODICT is returned
+# as the word to indicate that the bot doesn't have the resource it requires.
+
+sub _get_word_from_file {
+    my ($wordfile) = @_;
+
+    # If there is no file, default to
+    if ( ! -e $wordfile) {
+        if ( ! -e $fallback_wordfile ) {
+            return "NODICT";
+        } else {
+            $wordfile = $fallback_wordfile;
+        }
+    }
+
+    open my $words_fh, '<', $wordfile;
+    my @words = <$words_fh>;
+    close $words_fh;
 
     my $word = $words[ sprintf("%2d", rand($#words)) ];
     $word =~ s/'s$//;
 
     chomp($word);
 
-    return $word;
+    return lc $word;
 }
 
+# TODO - Implement this...
 
-# Prints the game state line "public: _ _ _ _ 10/10"
-
-sub _game_state {
-    my ($self, $game_name) = @_;
-
-    # Get the game data.
-    my $games = $self->bot->store->get($namespace, 'games') // {};
-    my $data = $games->{$game_name}; 
-    if (!$data) {
-        return "There is currently no game in progess :-(";
-    }
-    
-    # Check for teh win
-    if ($data->{wordstate} !~ m/_/) {
-        delete $games->{$game_name};
-        $self->bot->store->set($namespace, 'games', $games);
-        return "\\o/ Congratulations, You win! Word: $data->{word}";
-    }
-    
-    # Check for teh lose.
-    if ($data->{lives} == 0) {
-        delete $games->{$game_name};
-        $self->bot->store->set($namespace, 'games', $games);
-        return ":-( You lose! Word: $data->{word}";
-    }
-
-    # Build a state line and return it to be said to the channel.
-    my $wordstate = $data->{wordstate};
-    chomp $wordstate;
-    return "$game_name:   $wordstate    $data->{lives}/10";
-}
+sub _get_word_from_urbandictionary { return lc "Not Yet Implemented"; }
 
 
 =head1 AUTHOR
